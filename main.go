@@ -38,8 +38,17 @@ func main() {
 	}
 	defer store.Close()
 
+	me, err := api.getMe()
+	if err != nil {
+		logrus.WithError(err).Fatal("getMe failed")
+	}
+	if strings.TrimSpace(me.Username) == "" {
+		logrus.Fatal("getMe returned empty username")
+	}
+
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.GET("/", rootRedirectHandler(me.Username))
 	router.POST("/push/:token", pushHandler(api, store))
 	router.POST(cfg.webhookPath, webhookHandler(api, cfg, store))
 

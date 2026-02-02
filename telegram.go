@@ -30,6 +30,10 @@ type telegramAPI struct {
 	token string
 }
 
+type botInfo struct {
+	Username string `json:"username"`
+}
+
 func (api telegramAPI) sendMessage(chatID int64, text, parseMode string, silent bool) error {
 	payload := map[string]any{
 		"chat_id":              chatID,
@@ -77,6 +81,20 @@ func (api telegramAPI) deleteWebhook() error {
 		"drop_pending_updates": true,
 	}
 	return api.postJSON("deleteWebhook", payload, nil)
+}
+
+func (api telegramAPI) getMe() (botInfo, error) {
+	var resp struct {
+		OK     bool    `json:"ok"`
+		Result botInfo `json:"result"`
+	}
+	if err := api.postJSON("getMe", map[string]any{}, &resp); err != nil {
+		return botInfo{}, err
+	}
+	if !resp.OK {
+		return botInfo{}, errors.New("telegram api error")
+	}
+	return resp.Result, nil
 }
 
 func (api telegramAPI) postJSON(method string, payload any, out any) error {

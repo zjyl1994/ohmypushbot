@@ -58,6 +58,13 @@ func pushHandler(api telegramAPI, store *tokenStore) gin.HandlerFunc {
 	}
 }
 
+func rootRedirectHandler(botUsername string) gin.HandlerFunc {
+	target := "https://t.me/" + strings.TrimPrefix(botUsername, "@")
+	return func(c *gin.Context) {
+		c.Redirect(http.StatusFound, target)
+	}
+}
+
 func webhookHandler(api telegramAPI, cfg config, store *tokenStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !cfg.webhookEnabled {
