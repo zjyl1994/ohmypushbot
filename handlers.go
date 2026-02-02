@@ -1,18 +1,19 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-telegram/bot"
+	"github.com/go-telegram/bot/models"
 	"github.com/sirupsen/logrus"
 )
 
-func pushHandler(api telegramAPI, store *tokenStore) gin.HandlerFunc {
+func pushHandler(b *bot.Bot, store *tokenStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := strings.TrimSpace(c.Param("token"))
 		if token == "" {
@@ -44,12 +45,18 @@ func pushHandler(api telegramAPI, store *tokenStore) gin.HandlerFunc {
 
 		query := c.Request.URL.Query()
 		silent := query.Has("slient")
-		parseMode := ""
+		var parseMode models.ParseMode
 		if query.Has("mark") {
-			parseMode = "Markdown"
+			parseMode = models.ParseModeMarkdown
 		}
 
-		if err := api.sendMessage(chatID, text, parseMode, silent); err != nil {
+		_, err = b.SendMessage(c.Request.Context(), &bot.SendMessageParams{
+			ChatID:              chatID,
+			Text:                text,
+			ParseMode:           parseMode,
+			DisableNotification: silent,
+		})
+		if err != nil {
 			c.String(http.StatusBadGateway, "send failed: "+err.Error())
 			return
 		}
@@ -65,93 +72,51 @@ func rootRedirectHandler(botUsername string) gin.HandlerFunc {
 	}
 }
 
-func webhookHandler(api telegramAPI, cfg config, store *tokenStore) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !cfg.webhookEnabled {
-			c.String(http.StatusNotFound, "webhook disabled")
-			return
-		}
-		if cfg.webhookSecret == "" {
-			c.String(http.StatusForbidden, "webhook secret not configured")
-			return
-		}
-		if c.GetHeader("X-Telegram-Bot-Api-Secret-Token") != cfg.webhookSecret {
-			c.String(http.StatusForbidden, "invalid webhook secret")
+func botUpdateHandler(cfg config, store *tokenStore) bot.HandlerFunc {
+	return func(ctx context.Context, b *bot.Bot, update *models.Update) {
+		if update == nil || update.Message == nil {
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
-		if err != nil {
-			c.String(http.StatusBadRequest, "read body failed")
+		cmd := parseCommand(update.Message.Text)
+		if cmd == "" {
 			return
 		}
 
-		var upd update
-		if err := json.Unmarshal(body, &upd); err != nil {
-			c.String(http.StatusBadRequest, "invalid update")
-			return
-		}
-
-		handleUpdate(api, cfg, store, upd)
-		c.Status(http.StatusNoContent)
-	}
-}
-
-func pollUpdates(api telegramAPI, cfg config, store *tokenStore) {
-	var offset int64
-	for {
-		updates, err := api.getUpdates(offset)
-		if err != nil {
-			logrus.WithError(err).Warn("getUpdates failed")
-			time.Sleep(2 * time.Second)
-			continue
-		}
-		for _, upd := range updates {
-			handleUpdate(api, cfg, store, upd)
-			if upd.UpdateID >= offset {
-				offset = upd.UpdateID + 1
+		switch cmd {
+		case "/start":
+			token, err := store.getOrCreateToken(update.Message.Chat.ID)
+			if err != nil {
+				logrus.WithError(err).Error("issue token failed")
+				return
 			}
-		}
-	}
-}
-
-func handleUpdate(api telegramAPI, cfg config, store *tokenStore, upd update) {
-	if upd.Message == nil {
-		return
-	}
-
-	cmd := parseCommand(upd.Message.Text)
-	if cmd == "" {
-		return
-	}
-
-	switch cmd {
-	case "/start":
-		token, err := store.getOrCreateToken(upd.Message.Chat.ID)
-		if err != nil {
-			logrus.WithError(err).Error("issue token failed")
-			return
-		}
-		link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
-		reply := "Push URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
-		if err := api.sendMessage(upd.Message.Chat.ID, reply, "", false); err != nil {
-			logrus.WithError(err).Warn("send start reply failed")
-		}
-	case "/revoke":
-		_, err := store.revokeToken(upd.Message.Chat.ID)
-		if err != nil {
-			logrus.WithError(err).Error("revoke token failed")
-			return
-		}
-		token, err := store.issueTokenForce(upd.Message.Chat.ID)
-		if err != nil {
-			logrus.WithError(err).Error("issue token failed")
-			return
-		}
-		link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
-		reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message"
-		if err := api.sendMessage(upd.Message.Chat.ID, reply, "", false); err != nil {
-			logrus.WithError(err).Warn("send revoke reply failed")
+			link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
+			reply := "Push URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
+			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: update.Message.Chat.ID,
+				Text:   reply,
+			}); err != nil {
+				logrus.WithError(err).Warn("send start reply failed")
+			}
+		case "/revoke":
+			_, err := store.revokeToken(update.Message.Chat.ID)
+			if err != nil {
+				logrus.WithError(err).Error("revoke token failed")
+				return
+			}
+			token, err := store.issueTokenForce(update.Message.Chat.ID)
+			if err != nil {
+				logrus.WithError(err).Error("issue token failed")
+				return
+			}
+			link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
+			reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message"
+			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+				ChatID: update.Message.Chat.ID,
+				Text:   reply,
+			}); err != nil {
+				logrus.WithError(err).Warn("send revoke reply failed")
+			}
 		}
 	}
 }

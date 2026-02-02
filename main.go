@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-telegram/bot"
 	"github.com/sirupsen/logrus"
 )
 
@@ -31,26 +35,42 @@ func main() {
 		logrus.WithError(err).Fatal("config error")
 	}
 
-	api := telegramAPI{token: cfg.token}
 	store, err := openStore(cfg.dbPath)
 	if err != nil {
 		logrus.WithError(err).Fatal("open sqlite failed")
 	}
 	defer store.Close()
 
-	me, err := api.getMe()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	botOptions := []bot.Option{
+		bot.WithDefaultHandler(botUpdateHandler(cfg, store)),
+	}
+	if cfg.webhookEnabled {
+		botOptions = append(botOptions, bot.WithWebhookSecretToken(cfg.webhookSecret))
+	}
+	tg, err := bot.New(cfg.token, botOptions...)
+	if err != nil {
+		logrus.WithError(err).Fatal("init bot failed")
+	}
+
+	me, err := tg.GetMe(ctx)
 	if err != nil {
 		logrus.WithError(err).Fatal("getMe failed")
 	}
-	if strings.TrimSpace(me.Username) == "" {
+	botUsername := strings.TrimSpace(me.Username)
+	if botUsername == "" {
 		logrus.Fatal("getMe returned empty username")
 	}
 
 	router := gin.New()
 	router.Use(gin.Recovery())
-	router.GET("/", rootRedirectHandler(me.Username))
-	router.POST("/push/:token", pushHandler(api, store))
-	router.POST(cfg.webhookPath, webhookHandler(api, cfg, store))
+	router.GET("/", rootRedirectHandler(botUsername))
+	router.POST("/push/:token", pushHandler(tg, store))
+	if cfg.webhookEnabled {
+		router.POST(cfg.webhookPath, gin.WrapH(tg.WebhookHandler()))
+	}
 
 	server := &http.Server{
 		Addr:              cfg.addr,
@@ -59,7 +79,10 @@ func main() {
 	}
 
 	if cfg.webhookEnabled {
-		if err := api.setWebhook(cfg.webhookURL+cfg.webhookPath, cfg.webhookSecret); err != nil {
+		if _, err := tg.SetWebhook(ctx, &bot.SetWebhookParams{
+			URL:         cfg.webhookURL + cfg.webhookPath,
+			SecretToken: cfg.webhookSecret,
+		}); err != nil {
 			logrus.WithError(err).Fatal("set webhook failed")
 		}
 		maskedPath := cfg.webhookPath
@@ -70,11 +93,14 @@ func main() {
 			"url":  cfg.webhookURL,
 			"path": maskedPath,
 		}).Info("webhook enabled")
+		go tg.StartWebhook(ctx)
 	} else {
-		if err := api.deleteWebhook(); err != nil {
+		if _, err := tg.DeleteWebhook(ctx, &bot.DeleteWebhookParams{
+			DropPendingUpdates: true,
+		}); err != nil {
 			logrus.WithError(err).Warn("delete webhook failed")
 		}
-		go pollUpdates(api, cfg, store)
+		go tg.Start(ctx)
 		logrus.Info("polling enabled")
 	}
 
