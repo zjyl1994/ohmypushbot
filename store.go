@@ -2,11 +2,14 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql/driver"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,15 +19,45 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+type PushToken uint64
+
+func (pt PushToken) String() string {
+	return strconv.FormatUint(uint64(pt), 10)
+}
+
+func (pt PushToken) Value() (driver.Value, error) {
+	return int64(pt), nil
+}
+
+func (pt *PushToken) Scan(value interface{}) error {
+	if value == nil {
+		return nil
+	}
+	v, ok := value.(int64)
+	if !ok {
+		return fmt.Errorf("unsupported type: %T", value)
+	}
+	*pt = PushToken(v)
+	return nil
+}
+
+func ParsePushToken(s string) (PushToken, error) {
+	v, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return PushToken(v), nil
+}
+
 type tokenStore struct {
 	db *gorm.DB
 }
 
 type pushToken struct {
-	ChatID    int64  `gorm:"column:chat_id;primaryKey"`
-	Token     string `gorm:"column:token;uniqueIndex:idx_push_tokens_token"`
-	CreatedAt int64  `gorm:"column:created_at"`
-	RevokedAt *int64 `gorm:"column:revoked_at"`
+	ChatID    int64     `gorm:"column:chat_id;primaryKey"`
+	Token     PushToken `gorm:"column:token;uniqueIndex:idx_push_tokens_token"`
+	CreatedAt int64     `gorm:"column:created_at"`
+	RevokedAt *int64    `gorm:"column:revoked_at"`
 }
 
 func (pushToken) TableName() string {
@@ -76,23 +109,23 @@ func (s *tokenStore) Close() error {
 	return raw.Close()
 }
 
-func (s *tokenStore) getOrCreateToken(chatID int64) (string, error) {
+func (s *tokenStore) getOrCreateToken(chatID int64) (PushToken, error) {
 	token, revoked, err := s.getToken(chatID)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
-	if token != "" && !revoked {
+	if token != 0 && !revoked {
 		return token, nil
 	}
 	return s.issueTokenForce(chatID)
 }
 
-func (s *tokenStore) issueTokenForce(chatID int64) (string, error) {
+func (s *tokenStore) issueTokenForce(chatID int64) (PushToken, error) {
 	now := time.Now().Unix()
 	for i := 0; i < 5; i++ {
 		token, err := newToken()
 		if err != nil {
-			return "", err
+			return 0, err
 		}
 		err = s.upsertToken(chatID, token, now)
 		if err == nil {
@@ -101,24 +134,24 @@ func (s *tokenStore) issueTokenForce(chatID int64) (string, error) {
 		if isUniqueTokenErr(err) {
 			continue
 		}
-		return "", err
+		return 0, err
 	}
-	return "", errors.New("token collision")
+	return 0, errors.New("token collision")
 }
 
-func (s *tokenStore) getToken(chatID int64) (string, bool, error) {
+func (s *tokenStore) getToken(chatID int64) (PushToken, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "chat_id = ?", chatID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", false, nil
+		return 0, false, nil
 	}
 	if err != nil {
-		return "", false, err
+		return 0, false, err
 	}
 	return record.Token, record.RevokedAt != nil, nil
 }
 
-func (s *tokenStore) upsertToken(chatID int64, token string, now int64) error {
+func (s *tokenStore) upsertToken(chatID int64, token PushToken, now int64) error {
 	record := pushToken{
 		ChatID:    chatID,
 		Token:     token,
@@ -143,27 +176,39 @@ func (s *tokenStore) revokeToken(chatID int64) (bool, error) {
 	return res.RowsAffected > 0, res.Error
 }
 
-func (s *tokenStore) resolveChatID(token string) (int64, bool, error) {
+func (s *tokenStore) resolveChatID(token PushToken) (int64, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "token = ?", token).Error
+	if err == nil {
+		if record.RevokedAt != nil {
+			return 0, false, nil
+		}
+		return record.ChatID, true, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, false, err
+	}
+
+	// Try matching HEX string (legacy)
+	err = s.db.First(&record, "token = ?", token.String()).Error
+	if err == nil {
+		if record.RevokedAt != nil {
+			return 0, false, nil
+		}
+		return record.ChatID, true, nil
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, false, nil
 	}
-	if err != nil {
-		return 0, false, err
-	}
-	if record.RevokedAt != nil {
-		return 0, false, nil
-	}
-	return record.ChatID, true, nil
+	return 0, false, err
 }
 
-func newToken() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+func newToken() (PushToken, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return 0, err
 	}
-	return fmt.Sprintf("%x", buf), nil
+	return PushToken(binary.BigEndian.Uint64(b)), nil
 }
 
 func isUniqueTokenErr(err error) bool {

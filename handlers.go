@@ -13,11 +13,22 @@ import (
 	"github.com/go-telegram/bot/models"
 )
 
-func pushHandler(b *bot.Bot, store *tokenStore) gin.HandlerFunc {
+func pushHandler(b *bot.Bot, store *tokenStore, limiter *LRULimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := strings.TrimSpace(c.Param("token"))
-		if token == "" {
+		tokenStr := strings.TrimSpace(c.Param("token"))
+		if tokenStr == "" {
 			c.String(http.StatusBadRequest, "invalid push path")
+			return
+		}
+
+		token, err := ParsePushToken(tokenStr)
+		if err != nil {
+			c.String(http.StatusBadRequest, "invalid token format")
+			return
+		}
+
+		if !limiter.Allow(uint64(token)) {
+			c.String(http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
 

@@ -48,6 +48,8 @@ func main() {
 	}
 	defer store.Close()
 
+	limiter := NewLRULimiter(10000)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -77,7 +79,7 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.GET("/", rootRedirectHandler(botUsername))
-	router.POST("/push/:token", pushHandler(tg, store))
+	router.POST("/push/:token", pushHandler(tg, store, limiter))
 	if cfg.webhookEnabled {
 		router.POST(cfg.webhookPath, gin.WrapH(tg.WebhookHandler()))
 	}
