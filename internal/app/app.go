@@ -56,8 +56,12 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return errors.New("getMe returned empty username")
 	}
 
+	gin.DefaultWriter = newSlogWriter(log, slog.LevelInfo, "gin")
+	gin.DefaultErrorWriter = newSlogWriter(log, slog.LevelError, "gin")
+
 	router := gin.New()
-	router.Use(gin.Recovery())
+	router.Use(ginSlogMiddleware(log))
+	router.Use(gin.RecoveryWithWriter(newSlogWriter(log, slog.LevelError, "gin")))
 	router.GET("/", httpapi.RootRedirectHandler(botUsername))
 	router.POST("/push/:token", httpapi.PushHandler())
 	if cfg.WebhookEnabled {
