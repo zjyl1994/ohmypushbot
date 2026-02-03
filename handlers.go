@@ -42,7 +42,7 @@ func pushHandler(b *bot.Bot, store *tokenStore, limiter *LRULimiter) gin.Handler
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10*1024))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 64*1024))
 		if err != nil {
 			c.String(http.StatusBadRequest, "read body failed")
 			return
@@ -52,6 +52,12 @@ func pushHandler(b *bot.Bot, store *tokenStore, limiter *LRULimiter) gin.Handler
 		if text == "" {
 			c.String(http.StatusBadRequest, "empty body")
 			return
+		}
+
+		runes := []rune(text)
+		if len(runes) > 4000 {
+			remaining := len(runes) - 4000
+			text = string(runes[:4000]) + fmt.Sprintf("... (%d characters remaining)", remaining)
 		}
 
 		query := c.Request.URL.Query()
