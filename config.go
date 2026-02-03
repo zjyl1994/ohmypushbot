@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -71,40 +70,6 @@ func loadConfig() (config, error) {
 		cfg.webhookURL = baseURL
 	}
 	return cfg, nil
-}
-
-func loadDotEnv(path string) error {
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-
-	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-
-		key = strings.TrimSpace(key)
-		value = strings.TrimSpace(value)
-		if key == "" {
-			continue
-		}
-
-		value = strings.Trim(value, `"'`)
-		if os.Getenv(key) == "" {
-			_ = os.Setenv(key, value)
-		}
-	}
-	return nil
 }
 
 func parseEnvBool(value string) bool {

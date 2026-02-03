@@ -12,22 +12,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-telegram/bot"
+	_ "github.com/joho/godotenv/autoload"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
-	if err := loadDotEnv(".env"); err != nil {
-		logrus.WithError(err).Warn("load .env")
-	}
-
 	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-	if level := strings.TrimSpace(os.Getenv("LOG_LEVEL")); level != "" {
-		parsed, err := logrus.ParseLevel(level)
-		if err != nil {
-			logrus.WithError(err).Warn("invalid LOG_LEVEL, using info")
-		} else {
-			logrus.SetLevel(parsed)
-		}
+	if parseEnvBool("DEBUG") {
+		logrus.SetLevel(logrus.DebugLevel)
 	}
 
 	cfg, err := loadConfig()
@@ -72,12 +64,6 @@ func main() {
 		router.POST(cfg.webhookPath, gin.WrapH(tg.WebhookHandler()))
 	}
 
-	server := &http.Server{
-		Addr:              cfg.addr,
-		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
 	if cfg.webhookEnabled {
 		if _, err := tg.SetWebhook(ctx, &bot.SetWebhookParams{
 			URL:         cfg.webhookURL + cfg.webhookPath,
@@ -104,8 +90,27 @@ func main() {
 		logrus.Info("polling enabled")
 	}
 
-	logrus.WithField("addr", cfg.addr).Info("listening")
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logrus.WithError(err).Fatal("server error")
+	srv := &http.Server{
+		Addr:    cfg.addr,
+		Handler: router,
 	}
+
+	go func() {
+		logrus.WithField("addr", cfg.addr).Info("listening")
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logrus.WithError(err).Fatal("server error")
+		}
+	}()
+
+	<-ctx.Done()
+	logrus.Info("shutting down server...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logrus.WithError(err).Fatal("server forced to shutdown")
+	}
+
+	logrus.Info("server exited")
 }

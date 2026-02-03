@@ -31,7 +31,7 @@ func pushHandler(b *bot.Bot, store *tokenStore) gin.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10*1024))
 		if err != nil {
 			c.String(http.StatusBadRequest, "read body failed")
 			return
