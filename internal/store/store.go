@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"crypto/rand"
@@ -49,7 +49,7 @@ func ParsePushToken(s string) (PushToken, error) {
 	return PushToken(v), nil
 }
 
-type tokenStore struct {
+type Store struct {
 	db *gorm.DB
 }
 
@@ -64,16 +64,20 @@ func (pushToken) TableName() string {
 	return "push_tokens"
 }
 
-func openStore(path string) (*tokenStore, error) {
+func Open(path string, log *slog.Logger, debug bool) (*Store, error) {
 	dir := filepath.Dir(path)
 	if dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
 	}
 
-	gormLogger := NewGormLogger(slog.Default())
-	if parseEnvBool("DEBUG") {
+	if log == nil {
+		log = slog.Default()
+	}
+
+	gormLogger := NewGormLogger(log)
+	if debug {
 		gormLogger.LogLevel = logger.Info
 	}
 
@@ -98,10 +102,10 @@ func openStore(path string) (*tokenStore, error) {
 		return nil, err
 	}
 
-	return &tokenStore{db: db}, nil
+	return &Store{db: db}, nil
 }
 
-func (s *tokenStore) Close() error {
+func (s *Store) Close() error {
 	raw, err := s.db.DB()
 	if err != nil {
 		return err
@@ -109,7 +113,7 @@ func (s *tokenStore) Close() error {
 	return raw.Close()
 }
 
-func (s *tokenStore) getOrCreateToken(chatID int64) (PushToken, error) {
+func (s *Store) GetOrCreateToken(chatID int64) (PushToken, error) {
 	token, revoked, err := s.getToken(chatID)
 	if err != nil {
 		return 0, err
@@ -117,10 +121,10 @@ func (s *tokenStore) getOrCreateToken(chatID int64) (PushToken, error) {
 	if token != 0 && !revoked {
 		return token, nil
 	}
-	return s.issueTokenForce(chatID)
+	return s.IssueTokenForce(chatID)
 }
 
-func (s *tokenStore) issueTokenForce(chatID int64) (PushToken, error) {
+func (s *Store) IssueTokenForce(chatID int64) (PushToken, error) {
 	now := time.Now().Unix()
 	for i := 0; i < 5; i++ {
 		token, err := newToken()
@@ -139,7 +143,7 @@ func (s *tokenStore) issueTokenForce(chatID int64) (PushToken, error) {
 	return 0, errors.New("token collision")
 }
 
-func (s *tokenStore) getToken(chatID int64) (PushToken, bool, error) {
+func (s *Store) getToken(chatID int64) (PushToken, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "chat_id = ?", chatID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -151,7 +155,7 @@ func (s *tokenStore) getToken(chatID int64) (PushToken, bool, error) {
 	return record.Token, record.RevokedAt != nil, nil
 }
 
-func (s *tokenStore) upsertToken(chatID int64, token PushToken, now int64) error {
+func (s *Store) upsertToken(chatID int64, token PushToken, now int64) error {
 	record := pushToken{
 		ChatID:    chatID,
 		Token:     token,
@@ -168,7 +172,7 @@ func (s *tokenStore) upsertToken(chatID int64, token PushToken, now int64) error
 	}).Create(&record).Error
 }
 
-func (s *tokenStore) revokeToken(chatID int64) (bool, error) {
+func (s *Store) RevokeToken(chatID int64) (bool, error) {
 	now := time.Now().Unix()
 	res := s.db.Model(&pushToken{}).
 		Where("chat_id = ? AND revoked_at IS NULL", chatID).
@@ -176,7 +180,7 @@ func (s *tokenStore) revokeToken(chatID int64) (bool, error) {
 	return res.RowsAffected > 0, res.Error
 }
 
-func (s *tokenStore) resolveChatID(token PushToken) (int64, bool, error) {
+func (s *Store) ResolveChatID(token PushToken) (int64, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "token = ?", token).Error
 	if err == nil {

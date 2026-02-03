@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"crypto/sha256"
@@ -13,21 +13,24 @@ const (
 	defaultWebhookPath = "/webhook"
 )
 
-type config struct {
-	token          string
-	addr           string
-	baseURL        string
-	webhookURL     string
-	webhookPath    string
-	webhookSecret  string
-	webhookEnabled bool
-	dbPath         string
+// Config holds all runtime settings sourced from environment variables.
+type Config struct {
+	Debug          bool
+	Token          string
+	Addr           string
+	BaseURL        string
+	DBPath         string
+	WebhookURL     string
+	WebhookPath    string
+	WebhookSecret  string
+	WebhookEnabled bool
 }
 
-func loadConfig() (config, error) {
+// Load reads configuration from environment variables and applies defaults.
+func Load() (Config, error) {
 	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	if token == "" {
-		return config{}, errors.New("TELEGRAM_BOT_TOKEN is required")
+		return Config{}, errors.New("TELEGRAM_BOT_TOKEN is required")
 	}
 
 	addr := strings.TrimSpace(os.Getenv("WEB_ADDR"))
@@ -44,6 +47,11 @@ func loadConfig() (config, error) {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
+	dbPath := strings.TrimSpace(os.Getenv("SQLITE_PATH"))
+	if dbPath == "" {
+		dbPath = "ohmypushbot.db"
+	}
+
 	webhookEnabled := parseEnvBool(os.Getenv("WEBHOOK_ENABLED"))
 	webhookSecret := strings.TrimSpace(os.Getenv("WEBHOOK_SECRET_TOKEN"))
 	if webhookEnabled && webhookSecret == "" {
@@ -51,23 +59,19 @@ func loadConfig() (config, error) {
 		webhookSecret = hex.EncodeToString(sum[:])
 	}
 
-	dbPath := strings.TrimSpace(os.Getenv("SQLITE_PATH"))
-	if dbPath == "" {
-		dbPath = "ohmypushbot.db"
-	}
-
-	cfg := config{
-		token:          token,
-		addr:           addr,
-		baseURL:        baseURL,
-		webhookURL:     "",
-		webhookPath:    defaultWebhookPath + "/" + token,
-		webhookSecret:  webhookSecret,
-		webhookEnabled: webhookEnabled,
-		dbPath:         dbPath,
+	cfg := Config{
+		Debug:          parseEnvBool(os.Getenv("DEBUG")),
+		Token:          token,
+		Addr:           addr,
+		BaseURL:        baseURL,
+		DBPath:         dbPath,
+		WebhookURL:     "",
+		WebhookPath:    defaultWebhookPath + "/" + token,
+		WebhookSecret:  webhookSecret,
+		WebhookEnabled: webhookEnabled,
 	}
 	if webhookEnabled {
-		cfg.webhookURL = baseURL
+		cfg.WebhookURL = baseURL
 	}
 	return cfg, nil
 }
