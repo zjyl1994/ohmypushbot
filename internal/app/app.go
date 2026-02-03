@@ -20,7 +20,12 @@ import (
 	"github.com/zjyl1994/ohmypushbot/internal/vars"
 )
 
-const limiterSize = 10000
+const (
+	limiterSize   = 10000
+	sendWorkers   = 2
+	sendQueueSize = 1024
+	sendTimeout   = 10 * time.Second
+)
 
 func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	tStore, err := store.Open(cfg.DBPath, log, cfg.Debug)
@@ -45,6 +50,7 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return fmt.Errorf("init bot failed: %w", err)
 	}
 	vars.Bot = tg
+	vars.Sender = telegram.NewSender(ctx, tg, log, sendWorkers, sendQueueSize, sendTimeout)
 
 	me, err := tg.GetMe(ctx)
 	if err != nil {
@@ -92,8 +98,12 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 
 	srv := &http.Server{
-		Addr:    cfg.Addr,
-		Handler: router,
+		Addr:              cfg.Addr,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	serverErr := make(chan error, 1)

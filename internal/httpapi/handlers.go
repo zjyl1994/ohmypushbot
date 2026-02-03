@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
 	"github.com/zjyl1994/ohmypushbot/internal/store"
@@ -81,24 +80,22 @@ func PushHandler() gin.HandlerFunc {
 			text = telegram.SmartConvert(text)
 		}
 
-		b := vars.Bot
-		if b == nil {
-			c.String(http.StatusServiceUnavailable, "bot unavailable")
+		sender := vars.Sender
+		if sender == nil {
+			c.String(http.StatusServiceUnavailable, "sender unavailable")
 			return
 		}
-
-		_, err = b.SendMessage(c.Request.Context(), &bot.SendMessageParams{
+		if !sender.Enqueue(telegram.SendJob{
 			ChatID:              chatID,
 			Text:                text,
 			ParseMode:           parseMode,
 			DisableNotification: silent,
-		})
-		if err != nil {
-			c.String(http.StatusBadGateway, "send failed: "+err.Error())
+		}) {
+			c.String(http.StatusServiceUnavailable, "message queue full")
 			return
 		}
 
-		c.Status(http.StatusNoContent)
+		c.Status(http.StatusAccepted)
 	}
 }
 
