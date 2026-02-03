@@ -16,6 +16,7 @@ import (
 
 func PushHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		const maxMessageRunes = 3000
 		tokenStr := strings.TrimSpace(c.Param("token"))
 		if tokenStr == "" {
 			c.String(http.StatusBadRequest, "invalid push path")
@@ -67,9 +68,14 @@ func PushHandler() gin.HandlerFunc {
 		}
 
 		runes := []rune(text)
-		if len(runes) > 4000 {
-			remaining := len(runes) - 4000
-			text = string(runes[:4000]) + fmt.Sprintf("... (%d characters remaining)", remaining)
+		if len(runes) > maxMessageRunes {
+			remaining := len(runes) - maxMessageRunes
+			suffix := fmt.Sprintf("... (%d characters remaining)", remaining)
+			if len(suffix) >= maxMessageRunes {
+				text = string(runes[:maxMessageRunes])
+			} else {
+				text = string(runes[:maxMessageRunes-len(suffix)]) + suffix
+			}
 		}
 
 		query := c.Request.URL.Query()
