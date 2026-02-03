@@ -1,15 +1,14 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql/driver"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
-	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -18,37 +17,53 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-type PushToken int64
+type PushToken [8]byte
+
+const tokenRetryLimit = 10
 
 func (pt PushToken) String() string {
-	return strconv.FormatInt(int64(pt), 10)
+	return base64.RawURLEncoding.EncodeToString(pt[:])
 }
 
 func (pt PushToken) Value() (driver.Value, error) {
-	return int64(pt), nil
+	buf := make([]byte, len(pt))
+	copy(buf, pt[:])
+	return buf, nil
 }
 
 func (pt *PushToken) Scan(value interface{}) error {
 	if value == nil {
 		return nil
 	}
-	v, ok := value.(int64)
-	if !ok {
+	switch v := value.(type) {
+	case []byte:
+		if len(v) != len(pt) {
+			return fmt.Errorf("invalid token length: %d", len(v))
+		}
+		copy(pt[:], v)
+		return nil
+	case string:
+		if len(v) != len(pt) {
+			return fmt.Errorf("invalid token length: %d", len(v))
+		}
+		copy(pt[:], []byte(v))
+		return nil
+	default:
 		return fmt.Errorf("unsupported type: %T", value)
 	}
-	*pt = PushToken(v)
-	return nil
 }
 
 func ParsePushToken(s string) (PushToken, error) {
-	v, err := strconv.ParseInt(s, 10, 64)
+	var token PushToken
+	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return 0, err
+		return token, err
 	}
-	if v <= 0 {
-		return 0, errors.New("token must be positive")
+	if len(raw) != len(token) {
+		return token, errors.New("invalid token length")
 	}
-	return PushToken(v), nil
+	copy(token[:], raw)
+	return token, nil
 }
 
 type Store struct {
@@ -57,7 +72,7 @@ type Store struct {
 
 type pushToken struct {
 	ChatID    int64     `gorm:"column:chat_id;primaryKey"`
-	Token     PushToken `gorm:"column:token;uniqueIndex:idx_push_tokens_token"`
+	Token     PushToken `gorm:"column:token;type:blob;size:8;uniqueIndex:idx_push_tokens_token"`
 	CreatedAt int64     `gorm:"column:created_at"`
 }
 
@@ -83,7 +98,8 @@ func Open(path string, log *slog.Logger, debug bool) (*Store, error) {
 	}
 
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
-		Logger: gormLogger,
+		Logger:         gormLogger,
+		TranslateError: true,
 	})
 	if err != nil {
 		return nil, err
@@ -117,7 +133,7 @@ func (s *Store) Close() error {
 func (s *Store) GetOrCreateToken(chatID int64) (PushToken, error) {
 	token, ok, err := s.getToken(chatID)
 	if err != nil {
-		return 0, err
+		return PushToken{}, err
 	}
 	if ok {
 		return token, nil
@@ -127,28 +143,31 @@ func (s *Store) GetOrCreateToken(chatID int64) (PushToken, error) {
 
 func (s *Store) IssueTokenForce(chatID int64) (PushToken, error) {
 	now := time.Now().Unix()
-	for i := 0; i < 5; i++ {
-		token := newToken()
+	for i := 0; i < tokenRetryLimit; i++ {
+		var token PushToken
+		if _, err := rand.Read(token[:]); err != nil {
+			return PushToken{}, err
+		}
 		err := s.upsertToken(chatID, token, now)
 		if err == nil {
 			return token, nil
 		}
-		if isUniqueTokenErr(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			continue
 		}
-		return 0, err
+		return PushToken{}, err
 	}
-	return 0, errors.New("token collision")
+	return PushToken{}, errors.New("token collision")
 }
 
 func (s *Store) getToken(chatID int64) (PushToken, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "chat_id = ?", chatID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, false, nil
+		return PushToken{}, false, nil
 	}
 	if err != nil {
-		return 0, false, err
+		return PushToken{}, false, err
 	}
 	return record.Token, true, nil
 }
@@ -178,12 +197,4 @@ func (s *Store) ResolveChatID(token PushToken) (int64, bool, error) {
 		return 0, false, err
 	}
 	return 0, false, nil
-}
-
-func newToken() PushToken {
-	return PushToken(rand.Int64N(math.MaxInt64) + 1)
-}
-
-func isUniqueTokenErr(err error) bool {
-	return errors.Is(err, gorm.ErrDuplicatedKey)
 }
