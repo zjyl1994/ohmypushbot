@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/zjyl1994/ohmypushbot/tgmd"
 )
 
 func pushHandler(b *bot.Bot, store *tokenStore, limiter *LRULimiter) gin.HandlerFunc {
@@ -65,6 +66,7 @@ func pushHandler(b *bot.Bot, store *tokenStore, limiter *LRULimiter) gin.Handler
 		var parseMode models.ParseMode
 		if query.Has("mark") {
 			parseMode = models.ParseModeMarkdown
+			text = tgmd.SmartConvert(text)
 		}
 
 		_, err = b.SendMessage(c.Request.Context(), &bot.SendMessageParams{

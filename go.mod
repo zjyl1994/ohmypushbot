@@ -8,6 +8,7 @@ require (
 	github.com/go-telegram/bot v1.18.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/joho/godotenv v1.5.1
+	github.com/yuin/goldmark v1.7.16
 	gorm.io/gorm v1.25.12
 )
 
