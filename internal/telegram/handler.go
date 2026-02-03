@@ -32,7 +32,7 @@ func CommandHandler(cfg config.Config, s *store.Store) bot.HandlerFunc {
 				return
 			}
 			link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
-			reply := "Push URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
+			reply := "Push URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
 			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: update.Message.Chat.ID,
 				Text:   reply,
@@ -40,18 +40,13 @@ func CommandHandler(cfg config.Config, s *store.Store) bot.HandlerFunc {
 				slog.Warn("send start reply failed", "error", err)
 			}
 		case "/revoke":
-			_, err := s.RevokeToken(update.Message.Chat.ID)
-			if err != nil {
-				slog.Error("revoke token failed", "error", err)
-				return
-			}
 			token, err := s.IssueTokenForce(update.Message.Chat.ID)
 			if err != nil {
 				slog.Error("issue token failed", "error", err)
 				return
 			}
 			link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
-			reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- slient: send silently\n- mark: Markdown message"
+			reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message"
 			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
 				ChatID: update.Message.Chat.ID,
 				Text:   reply,

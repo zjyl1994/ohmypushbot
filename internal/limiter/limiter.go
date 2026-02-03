@@ -8,16 +8,16 @@ import (
 )
 
 type LRULimiter struct {
-	cache *lru.Cache[uint64, int64]
+	cache *lru.Cache[int64, int64]
 	mu    sync.Mutex
 }
 
 func NewLRULimiter(size int) *LRULimiter {
-	c, _ := lru.New[uint64, int64](size)
+	c, _ := lru.New[int64, int64](size)
 	return &LRULimiter{cache: c}
 }
 
-func (l *LRULimiter) Allow(id uint64) bool {
+func (l *LRULimiter) Allow(id int64) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 

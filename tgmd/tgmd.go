@@ -20,6 +20,8 @@ var bufferPool = sync.Pool{
 }
 
 var (
+	// 复用 Markdown 解析器，避免高频场景下的重复构造
+	md = goldmark.New()
 	// 预编译正则以提高检测性能
 	tgFormatRegex = regexp.MustCompile(`\\[.!#\-+=\\*_\[\]()]|\|\|.*?\|\|`)
 	// Telegram MarkdownV2 要求的转义映射
@@ -43,8 +45,7 @@ func SmartConvert(input string) string {
 		return input
 	}
 
-	// 2. 初始化解析器
-	md := goldmark.New()
+	// 2. 复用全局解析器
 	reader := text.NewReader([]byte(input))
 	doc := md.Parser().Parse(reader)
 

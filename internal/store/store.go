@@ -1,12 +1,11 @@
 package store
 
 import (
-	"crypto/rand"
 	"database/sql/driver"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,10 +18,10 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-type PushToken uint64
+type PushToken int64
 
 func (pt PushToken) String() string {
-	return strconv.FormatUint(uint64(pt), 10)
+	return strconv.FormatInt(int64(pt), 10)
 }
 
 func (pt PushToken) Value() (driver.Value, error) {
@@ -42,9 +41,12 @@ func (pt *PushToken) Scan(value interface{}) error {
 }
 
 func ParsePushToken(s string) (PushToken, error) {
-	v, err := strconv.ParseUint(s, 10, 64)
+	v, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, err
+	}
+	if v <= 0 {
+		return 0, errors.New("token must be positive")
 	}
 	return PushToken(v), nil
 }
@@ -57,7 +59,6 @@ type pushToken struct {
 	ChatID    int64     `gorm:"column:chat_id;primaryKey"`
 	Token     PushToken `gorm:"column:token;uniqueIndex:idx_push_tokens_token"`
 	CreatedAt int64     `gorm:"column:created_at"`
-	RevokedAt *int64    `gorm:"column:revoked_at"`
 }
 
 func (pushToken) TableName() string {
@@ -114,11 +115,11 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) GetOrCreateToken(chatID int64) (PushToken, error) {
-	token, revoked, err := s.getToken(chatID)
+	token, ok, err := s.getToken(chatID)
 	if err != nil {
 		return 0, err
 	}
-	if token != 0 && !revoked {
+	if ok {
 		return token, nil
 	}
 	return s.IssueTokenForce(chatID)
@@ -127,11 +128,8 @@ func (s *Store) GetOrCreateToken(chatID int64) (PushToken, error) {
 func (s *Store) IssueTokenForce(chatID int64) (PushToken, error) {
 	now := time.Now().Unix()
 	for i := 0; i < 5; i++ {
-		token, err := newToken()
-		if err != nil {
-			return 0, err
-		}
-		err = s.upsertToken(chatID, token, now)
+		token := newToken()
+		err := s.upsertToken(chatID, token, now)
 		if err == nil {
 			return token, nil
 		}
@@ -152,7 +150,7 @@ func (s *Store) getToken(chatID int64) (PushToken, bool, error) {
 	if err != nil {
 		return 0, false, err
 	}
-	return record.Token, record.RevokedAt != nil, nil
+	return record.Token, true, nil
 }
 
 func (s *Store) upsertToken(chatID int64, token PushToken, now int64) error {
@@ -160,59 +158,34 @@ func (s *Store) upsertToken(chatID int64, token PushToken, now int64) error {
 		ChatID:    chatID,
 		Token:     token,
 		CreatedAt: now,
-		RevokedAt: nil,
 	}
 	return s.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "chat_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"token":      token,
 			"created_at": now,
-			"revoked_at": nil,
 		}),
 	}).Create(&record).Error
-}
-
-func (s *Store) RevokeToken(chatID int64) (bool, error) {
-	now := time.Now().Unix()
-	res := s.db.Model(&pushToken{}).
-		Where("chat_id = ? AND revoked_at IS NULL", chatID).
-		Update("revoked_at", now)
-	return res.RowsAffected > 0, res.Error
 }
 
 func (s *Store) ResolveChatID(token PushToken) (int64, bool, error) {
 	var record pushToken
 	err := s.db.First(&record, "token = ?", token).Error
 	if err == nil {
-		if record.RevokedAt != nil {
-			return 0, false, nil
-		}
 		return record.ChatID, true, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return 0, false, err
 	}
-
-	// Try matching HEX string (legacy)
-	err = s.db.First(&record, "token = ?", token.String()).Error
-	if err == nil {
-		if record.RevokedAt != nil {
-			return 0, false, nil
-		}
-		return record.ChatID, true, nil
-	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, false, nil
-	}
-	return 0, false, err
+	return 0, false, nil
 }
 
-func newToken() (PushToken, error) {
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return 0, err
+func newToken() PushToken {
+	for {
+		if token := rand.Int64(); token > 0 {
+			return PushToken(token)
+		}
 	}
-	return PushToken(binary.BigEndian.Uint64(b)), nil
 }
 
 func isUniqueTokenErr(err error) bool {

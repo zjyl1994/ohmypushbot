@@ -5,7 +5,7 @@ UPX := $(shell command -v upx 2>/dev/null)
 all: clean build compress
 
 build:
-	go mod tidy && go build -ldflags "-s -w" -o $(TARGET) .
+	go build -ldflags "-s -w" -o $(TARGET) .
 
 compress: $(TARGET)
 ifdef UPX

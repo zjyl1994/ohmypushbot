@@ -29,7 +29,7 @@ func PushHandler(b *bot.Bot, s *store.Store, limiter *limiter.LRULimiter) gin.Ha
 			return
 		}
 
-		if !limiter.Allow(uint64(token)) {
+		if !limiter.Allow(int64(token)) {
 			c.String(http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
@@ -63,7 +63,7 @@ func PushHandler(b *bot.Bot, s *store.Store, limiter *limiter.LRULimiter) gin.Ha
 		}
 
 		query := c.Request.URL.Query()
-		silent := query.Has("slient")
+		silent := query.Has("silent")
 		var parseMode models.ParseMode
 		if query.Has("mark") {
 			parseMode = models.ParseModeMarkdown
