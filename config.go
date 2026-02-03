@@ -53,7 +53,7 @@ func loadConfig() (config, error) {
 
 	dbPath := strings.TrimSpace(os.Getenv("SQLITE_PATH"))
 	if dbPath == "" {
-		dbPath = "push.db"
+		dbPath = "ohmypushbot.db"
 	}
 
 	cfg := config{

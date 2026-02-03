@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,23 +14,37 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/go-telegram/bot"
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/sirupsen/logrus"
 )
 
 func main() {
-	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+	logLevel := slog.LevelInfo
 	if parseEnvBool("DEBUG") {
-		logrus.SetLevel(logrus.DebugLevel)
+		logLevel = slog.LevelDebug
+	} else {
+		gin.SetMode(gin.ReleaseMode)
 	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: logLevel,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Value = slog.StringValue(a.Value.Time().Format(time.RFC3339))
+			}
+			return a
+		},
+	}))
+	slog.SetDefault(logger)
 
 	cfg, err := loadConfig()
 	if err != nil {
-		logrus.WithError(err).Fatal("config error")
+		slog.Error("config error", "error", err)
+		os.Exit(1)
 	}
 
 	store, err := openStore(cfg.dbPath)
 	if err != nil {
-		logrus.WithError(err).Fatal("open sqlite failed")
+		slog.Error("open sqlite failed", "error", err)
+		os.Exit(1)
 	}
 	defer store.Close()
 
@@ -44,16 +59,19 @@ func main() {
 	}
 	tg, err := bot.New(cfg.token, botOptions...)
 	if err != nil {
-		logrus.WithError(err).Fatal("init bot failed")
+		slog.Error("init bot failed", "error", err)
+		os.Exit(1)
 	}
 
 	me, err := tg.GetMe(ctx)
 	if err != nil {
-		logrus.WithError(err).Fatal("getMe failed")
+		slog.Error("getMe failed", "error", err)
+		os.Exit(1)
 	}
 	botUsername := strings.TrimSpace(me.Username)
 	if botUsername == "" {
-		logrus.Fatal("getMe returned empty username")
+		slog.Error("getMe returned empty username")
+		os.Exit(1)
 	}
 
 	router := gin.New()
@@ -69,25 +87,23 @@ func main() {
 			URL:         cfg.webhookURL + cfg.webhookPath,
 			SecretToken: cfg.webhookSecret,
 		}); err != nil {
-			logrus.WithError(err).Fatal("set webhook failed")
+			slog.Error("set webhook failed", "error", err)
+			os.Exit(1)
 		}
 		maskedPath := cfg.webhookPath
 		if cfg.token != "" {
 			maskedPath = strings.ReplaceAll(maskedPath, cfg.token, "***")
 		}
-		logrus.WithFields(logrus.Fields{
-			"url":  cfg.webhookURL,
-			"path": maskedPath,
-		}).Info("webhook enabled")
+		slog.Info("webhook enabled", "url", cfg.webhookURL, "path", maskedPath)
 		go tg.StartWebhook(ctx)
 	} else {
 		if _, err := tg.DeleteWebhook(ctx, &bot.DeleteWebhookParams{
 			DropPendingUpdates: true,
 		}); err != nil {
-			logrus.WithError(err).Warn("delete webhook failed")
+			slog.Warn("delete webhook failed", "error", err)
 		}
 		go tg.Start(ctx)
-		logrus.Info("polling enabled")
+		slog.Info("polling enabled")
 	}
 
 	srv := &http.Server{
@@ -96,21 +112,23 @@ func main() {
 	}
 
 	go func() {
-		logrus.WithField("addr", cfg.addr).Info("listening")
+		slog.Info("listening", "addr", cfg.addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logrus.WithError(err).Fatal("server error")
+			slog.Error("server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
 	<-ctx.Done()
-	logrus.Info("shutting down server...")
+	slog.Info("shutting down server...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logrus.WithError(err).Fatal("server forced to shutdown")
+		slog.Error("server forced to shutdown", "error", err)
+		os.Exit(1)
 	}
 
-	logrus.Info("server exited")
+	slog.Info("server exited")
 }

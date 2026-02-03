@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/sirupsen/logrus"
 )
 
 func pushHandler(b *bot.Bot, store *tokenStore) gin.HandlerFunc {
@@ -87,7 +87,7 @@ func botUpdateHandler(cfg config, store *tokenStore) bot.HandlerFunc {
 		case "/start":
 			token, err := store.getOrCreateToken(update.Message.Chat.ID)
 			if err != nil {
-				logrus.WithError(err).Error("issue token failed")
+				slog.Error("issue token failed", "error", err)
 				return
 			}
 			link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
@@ -96,17 +96,17 @@ func botUpdateHandler(cfg config, store *tokenStore) bot.HandlerFunc {
 				ChatID: update.Message.Chat.ID,
 				Text:   reply,
 			}); err != nil {
-				logrus.WithError(err).Warn("send start reply failed")
+				slog.Warn("send start reply failed", "error", err)
 			}
 		case "/revoke":
 			_, err := store.revokeToken(update.Message.Chat.ID)
 			if err != nil {
-				logrus.WithError(err).Error("revoke token failed")
+				slog.Error("revoke token failed", "error", err)
 				return
 			}
 			token, err := store.issueTokenForce(update.Message.Chat.ID)
 			if err != nil {
-				logrus.WithError(err).Error("issue token failed")
+				slog.Error("issue token failed", "error", err)
 				return
 			}
 			link := fmt.Sprintf("%s/push/%s", cfg.baseURL, token)
@@ -115,7 +115,7 @@ func botUpdateHandler(cfg config, store *tokenStore) bot.HandlerFunc {
 				ChatID: update.Message.Chat.ID,
 				Text:   reply,
 			}); err != nil {
-				logrus.WithError(err).Warn("send revoke reply failed")
+				slog.Warn("send revoke reply failed", "error", err)
 			}
 		}
 	}

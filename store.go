@@ -4,16 +4,16 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-
-	_ "modernc.org/sqlite"
+	"gorm.io/gorm/logger"
 )
 
 type tokenStore struct {
@@ -39,10 +39,14 @@ func openStore(path string) (*tokenStore, error) {
 		}
 	}
 
-	db, err := gorm.Open(sqlite.New(sqlite.Config{
-		DriverName: "sqlite",
-		DSN:        path,
-	}), &gorm.Config{})
+	gormLogger := NewGormLogger(slog.Default())
+	if parseEnvBool("DEBUG") {
+		gormLogger.LogLevel = logger.Info
+	}
+
+	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{
+		Logger: gormLogger,
+	})
 	if err != nil {
 		return nil, err
 	}
