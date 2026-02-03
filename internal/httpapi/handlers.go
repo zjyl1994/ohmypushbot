@@ -10,12 +10,12 @@ import (
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 
-	"github.com/zjyl1994/ohmypushbot/internal/limiter"
 	"github.com/zjyl1994/ohmypushbot/internal/store"
-	"github.com/zjyl1994/ohmypushbot/tgmd"
+	"github.com/zjyl1994/ohmypushbot/internal/telegram"
+	"github.com/zjyl1994/ohmypushbot/internal/vars"
 )
 
-func PushHandler(b *bot.Bot, s *store.Store, limiter *limiter.LRULimiter) gin.HandlerFunc {
+func PushHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := strings.TrimSpace(c.Param("token"))
 		if tokenStr == "" {
@@ -29,12 +29,23 @@ func PushHandler(b *bot.Bot, s *store.Store, limiter *limiter.LRULimiter) gin.Ha
 			return
 		}
 
-		if !limiter.Allow(int64(token)) {
+		lim := vars.Limiter
+		if lim == nil {
+			c.String(http.StatusServiceUnavailable, "rate limiter unavailable")
+			return
+		}
+		if !lim.Allow(token) {
 			c.String(http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
 
-		chatID, ok, err := s.ResolveChatID(token)
+		store := vars.Store
+		if store == nil {
+			c.String(http.StatusServiceUnavailable, "store unavailable")
+			return
+		}
+
+		chatID, ok, err := store.ResolveChatID(token)
 		if err != nil {
 			c.String(http.StatusBadGateway, "token validation failed")
 			return
@@ -67,7 +78,13 @@ func PushHandler(b *bot.Bot, s *store.Store, limiter *limiter.LRULimiter) gin.Ha
 		var parseMode models.ParseMode
 		if query.Has("mark") {
 			parseMode = models.ParseModeMarkdown
-			text = tgmd.SmartConvert(text)
+			text = telegram.SmartConvert(text)
+		}
+
+		b := vars.Bot
+		if b == nil {
+			c.String(http.StatusServiceUnavailable, "bot unavailable")
+			return
 		}
 
 		_, err = b.SendMessage(c.Request.Context(), &bot.SendMessageParams{

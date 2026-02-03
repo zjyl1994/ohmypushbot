@@ -14,6 +14,7 @@ import (
 
 	"github.com/zjyl1994/ohmypushbot/internal/app"
 	"github.com/zjyl1994/ohmypushbot/internal/config"
+	"github.com/zjyl1994/ohmypushbot/internal/vars"
 )
 
 func main() {
@@ -22,6 +23,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
+	vars.Config = cfg
 
 	if !cfg.Debug {
 		gin.SetMode(gin.ReleaseMode)

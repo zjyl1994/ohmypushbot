@@ -1,4 +1,4 @@
-package tgmd
+package telegram
 
 import (
 	"bytes"

@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -181,13 +181,9 @@ func (s *Store) ResolveChatID(token PushToken) (int64, bool, error) {
 }
 
 func newToken() PushToken {
-	for {
-		if token := rand.Int64(); token > 0 {
-			return PushToken(token)
-		}
-	}
+	return PushToken(rand.Int64N(math.MaxInt64) + 1)
 }
 
 func isUniqueTokenErr(err error) bool {
-	return strings.Contains(err.Error(), "UNIQUE constraint failed: push_tokens.token")
+	return errors.Is(err, gorm.ErrDuplicatedKey)
 }

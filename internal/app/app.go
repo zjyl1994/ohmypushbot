@@ -17,6 +17,7 @@ import (
 	"github.com/zjyl1994/ohmypushbot/internal/limiter"
 	"github.com/zjyl1994/ohmypushbot/internal/store"
 	"github.com/zjyl1994/ohmypushbot/internal/telegram"
+	"github.com/zjyl1994/ohmypushbot/internal/vars"
 )
 
 const limiterSize = 10000
@@ -27,8 +28,10 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return fmt.Errorf("open sqlite failed: %w", err)
 	}
 	defer tStore.Close()
+	vars.Store = tStore
 
-	lim := limiter.NewLRULimiter(limiterSize)
+	lim := limiter.NewLRULimiter[store.PushToken](limiterSize)
+	vars.Limiter = lim
 
 	botOptions := []bot.Option{
 		bot.WithDefaultHandler(telegram.CommandHandler(cfg, tStore)),
@@ -41,6 +44,7 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("init bot failed: %w", err)
 	}
+	vars.Bot = tg
 
 	me, err := tg.GetMe(ctx)
 	if err != nil {
@@ -55,7 +59,7 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	router := gin.New()
 	router.Use(gin.Recovery())
 	router.GET("/", httpapi.RootRedirectHandler(botUsername))
-	router.POST("/push/:token", httpapi.PushHandler(tg, tStore, lim))
+	router.POST("/push/:token", httpapi.PushHandler())
 	if cfg.WebhookEnabled {
 		router.POST(cfg.WebhookPath, gin.WrapH(tg.WebhookHandler()))
 	}

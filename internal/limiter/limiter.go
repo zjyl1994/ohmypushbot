@@ -7,17 +7,17 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
-type LRULimiter struct {
-	cache *lru.Cache[int64, int64]
+type LRULimiter[K comparable] struct {
+	cache *lru.Cache[K, int64]
 	mu    sync.Mutex
 }
 
-func NewLRULimiter(size int) *LRULimiter {
-	c, _ := lru.New[int64, int64](size)
-	return &LRULimiter{cache: c}
+func NewLRULimiter[K comparable](size int) *LRULimiter[K] {
+	c, _ := lru.New[K, int64](size)
+	return &LRULimiter[K]{cache: c}
 }
 
-func (l *LRULimiter) Allow(id int64) bool {
+func (l *LRULimiter[K]) Allow(id K) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
