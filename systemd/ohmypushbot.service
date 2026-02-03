@@ -1,0 +1,16 @@
+[Unit]
+Description=OhMyPushBot
+After=network.target
+
+[Service]
+Type=simple
+#User=myuser
+#Group=mygroup
+StateDirectory=ohmypushbot
+Environment="WEB_ADDR=127.0.0.1:8000"
+Environment="TELEGRAM_BOT_TOKEN=123456:abcdefghijklmn"
+ExecStart=/usr/local/bin/ohmypushbot
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

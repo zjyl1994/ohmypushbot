@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -24,6 +25,7 @@ type Config struct {
 	WebhookPath    string
 	WebhookSecret  string
 	WebhookEnabled bool
+	StateDir       string
 }
 
 // Load reads configuration from environment variables and applies defaults.
@@ -31,6 +33,12 @@ func Load() (Config, error) {
 	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	if token == "" {
 		return Config{}, errors.New("TELEGRAM_BOT_TOKEN is required")
+	}
+
+	stateDir := os.Getenv("STATE_DIRECTORY")
+
+	if stateDir != "" {
+		stateDir = strings.Split(stateDir, ":")[0]
 	}
 
 	addr := strings.TrimSpace(os.Getenv("WEB_ADDR"))
@@ -49,7 +57,7 @@ func Load() (Config, error) {
 
 	dbPath := strings.TrimSpace(os.Getenv("SQLITE_PATH"))
 	if dbPath == "" {
-		dbPath = "ohmypushbot.db"
+		dbPath = filepath.Join(stateDir, "ohmypushbot.db")
 	}
 
 	webhookEnabled := parseEnvBool(os.Getenv("WEBHOOK_ENABLED"))
@@ -69,6 +77,7 @@ func Load() (Config, error) {
 		WebhookPath:    defaultWebhookPath + "/" + token,
 		WebhookSecret:  webhookSecret,
 		WebhookEnabled: webhookEnabled,
+		StateDir:       stateDir,
 	}
 	if webhookEnabled {
 		cfg.WebhookURL = baseURL
