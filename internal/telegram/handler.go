@@ -19,40 +19,19 @@ func CommandHandler(cfg config.Config, s *store.Store) bot.HandlerFunc {
 			return
 		}
 
-		cmd := parseCommand(update.Message.Text)
+		msg := update.Message
+		cmd := parseCommand(msg.Text)
 		if cmd == "" {
 			return
 		}
 
 		switch cmd {
 		case "/start":
-			token, err := s.GetOrCreateToken(update.Message.Chat.ID)
-			if err != nil {
-				slog.Error("issue token failed", "error", err)
-				return
-			}
-			link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
-			reply := "Push URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
-			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID: update.Message.Chat.ID,
-				Text:   reply,
-			}); err != nil {
-				slog.Warn("send start reply failed", "error", err)
-			}
+			handleStart(ctx, b, msg, cfg, s)
 		case "/revoke":
-			token, err := s.IssueTokenForce(update.Message.Chat.ID)
-			if err != nil {
-				slog.Error("issue token failed", "error", err)
-				return
-			}
-			link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
-			reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message"
-			if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
-				ChatID: update.Message.Chat.ID,
-				Text:   reply,
-			}); err != nil {
-				slog.Warn("send revoke reply failed", "error", err)
-			}
+			handleRevoke(ctx, b, msg, cfg, s)
+		case "/ping":
+			handlePing(ctx, b, msg)
 		}
 	}
 }
@@ -69,4 +48,49 @@ func parseCommand(text string) string {
 		}
 	}
 	return cmd
+}
+
+func handleStart(ctx context.Context, b *bot.Bot, msg *models.Message, cfg config.Config, s *store.Store) {
+	token, err := s.GetOrCreateToken(msg.Chat.ID)
+	if err != nil {
+		slog.Error("issue token failed", "error", err)
+		return
+	}
+	link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
+	reply := "Push URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message\n\nUse /revoke to disable this link."
+	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: msg.Chat.ID,
+		Text:   reply,
+	}); err != nil {
+		slog.Warn("send start reply failed", "error", err)
+	}
+}
+
+func handleRevoke(ctx context.Context, b *bot.Bot, msg *models.Message, cfg config.Config, s *store.Store) {
+	token, err := s.IssueTokenForce(msg.Chat.ID)
+	if err != nil {
+		slog.Error("issue token failed", "error", err)
+		return
+	}
+	link := fmt.Sprintf("%s/push/%s", cfg.BaseURL, token)
+	reply := "Old link revoked. New URL:\n" + link + "\n\nQuery params:\n- silent: send silently\n- mark: Markdown message"
+	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: msg.Chat.ID,
+		Text:   reply,
+	}); err != nil {
+		slog.Warn("send revoke reply failed", "error", err)
+	}
+}
+
+func handlePing(ctx context.Context, b *bot.Bot, msg *models.Message) {
+	if _, err := b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: msg.Chat.ID,
+		Text:   "Pong!",
+		ReplyParameters: &models.ReplyParameters{
+			MessageID: msg.ID,
+			ChatID:    msg.Chat.ID,
+		},
+	}); err != nil {
+		slog.Warn("send ping reply failed", "error", err)
+	}
 }

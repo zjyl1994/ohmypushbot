@@ -69,6 +69,7 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	router.Use(ginSlogMiddleware(log))
 	router.Use(gin.RecoveryWithWriter(newSlogWriter(log, slog.LevelError, "gin")))
 	router.GET("/", httpapi.RootRedirectHandler(botUsername))
+	router.GET("/health", httpapi.HealthHandler())
 	router.POST("/push/:token", httpapi.PushHandler())
 	if cfg.WebhookEnabled {
 		router.POST(cfg.WebhookPath, gin.WrapH(tg.WebhookHandler()))

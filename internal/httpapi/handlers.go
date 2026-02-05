@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-telegram/bot/models"
@@ -109,5 +110,15 @@ func RootRedirectHandler(botUsername string) gin.HandlerFunc {
 	target := "https://t.me/" + strings.TrimPrefix(botUsername, "@")
 	return func(c *gin.Context) {
 		c.Redirect(http.StatusFound, target)
+	}
+}
+
+func HealthHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		now := time.Now()
+		c.JSON(http.StatusOK, gin.H{
+			"server_time": now.Format(time.RFC3339),
+			"timestamp":   now.Unix(),
+		})
 	}
 }
